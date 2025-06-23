@@ -1,0 +1,61 @@
+<launch>
+  <!-- Arguments -->
+  <arg name="model" default="$(env TURTLEBOT3_MODEL)" doc="model type [burger, waffle, waffle_pi]"/>
+  <arg name="map_file" default="$(find ros_autonomous_slam)/maps/mymap.yaml"/>
+  <arg name="open_rviz" default="true"/>
+  <arg name="move_forward_only" default="false"/>
+
+  <!-- Turtlebot3 bringup -->
+  <include file="$(find turtlebot3_bringup)/launch/turtlebot3_remote.launch">
+    <arg name="model" value="$(arg model)" />
+  </include>
+
+  <!-- Map server -->
+  <node pkg="map_server" name="map_server" type="map_server" args="$(arg map_file)"/>
+
+  <!-- YOLOv5 -->
+  <node pkg="ros_autonomous_slam" type="ros_yolov5_node.py" name="ros_yolov5_node" output="screen"/>
+
+  <!-- Parameters -->
+  <rosparam file="$(find ros_autonomous_slam)/params/local_costmap_params.yaml" command="load" />
+
+  <!-- AMCL -->
+  <include file="$(find turtlebot3_navigation)/launch/amcl.launch"/>
+
+  <!-- move_base -->
+  <include file="$(find turtlebot3_navigation)/launch/move_base.launch">
+    <arg name="model" value="$(arg model)" />
+    <arg name="move_forward_only" value="$(arg move_forward_only)"/>
+  </include>
+
+  <!-- RViz -->
+  <group if="$(arg open_rviz)"> 
+    <node pkg="rviz" type="rviz" name="rviz" required="true"
+          args="-d $(find ros_autonomous_slam)/rviz/turtlebot3_navigation.rviz"/>
+  </group>
+
+  <!-- Step 1: Rectify depth image -->
+  <node pkg="image_proc" type="image_proc" name="depth_image_proc" output="screen">
+    <remap from="image_raw" to="/camera/depth/image_raw"/>
+    <remap from="camera_info" to="/camera/depth/camera_info"/>
+  </node>
+
+  <!-- Step 2: Convert rectified image to point cloud -->
+  <node pkg="depth_image_proc" type="point_cloud_xyz" name="depth2cloud" output="screen">
+    <remap from="image_rect" to="/camera/depth/image_rect_raw"/>
+    <remap from="camera_info" to="/camera/depth/camera_info"/>
+    <remap from="points" to="/camera/depth/points"/>
+  </node>
+
+  <!-- Optional: Convert depth image to laser scan (if needed for local_costmap) -->
+  <node pkg="nodelet" type="nodelet" name="depth_to_laserscan" args="standalone depthimage_to_laserscan/DepthImageToLaserScanNodelet" output="screen">
+    <param name="scan_time" value="0.033" />
+    <param name="range_min" value="0.3" />
+    <param name="range_max" value="3.5" />
+    <param name="output_frame_id" value="camera_link" />
+    <remap from="depth/image" to="/camera/depth/image_raw" />
+    <remap from="depth/camera_info" to="/camera/depth/camera_info" />
+    <remap from="scan" to="/scan_from_depth" />
+  </node>
+
+</launch>
